@@ -1,0 +1,6 @@
+.idea
+__pycache__
+.local
+frontend/node_modules
+frontend/dist
+.env

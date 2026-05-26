@@ -1,0 +1,15 @@
+# vLLM inference (WSL + CUDA)
+# uv pip install vllm --torch-backend=auto
+
+# Web API
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-dotenv>=1.0.0
+pydantic[email]>=2.0
+
+# Auth + PostgreSQL
+sqlmodel>=0.0.22
+asyncpg>=0.30.0
+PyJWT>=2.9.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0,<4.1
