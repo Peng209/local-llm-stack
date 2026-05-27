@@ -30,11 +30,13 @@ class Settings(BaseSettings):
 
     # 非密钥（可改代码默认值，也可用环境变量覆盖）
     hf_endpoint: str = "https://hf-mirror.com"
+    hf_hub_offline: bool = False
     vllm_model: str = "Qwen/Qwen2-VL-2B-Instruct"
     vllm_gpu_memory_utilization: float = 0.45
     vllm_max_model_len: int = 4096
     vllm_limit_images_per_prompt: int = 4
     vllm_kv_cache_memory_bytes: int = 536_870_912
+    vllm_preload_at_startup: bool = True
     vllm_default_max_tokens: int = 512
     local_vllm_stream_chunk_chars: int = 12
     local_vllm_stream_chunk_delay_sec: float = 0.02
@@ -42,6 +44,15 @@ class Settings(BaseSettings):
     httpx_timeout_seconds: int = 300
     db_echo: bool = False
     nginx_http_port: int = 80
+
+    @field_validator("hf_hub_offline", mode="before")
+    @classmethod
+    def _parse_hf_hub_offline(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ("1", "true", "yes")
+        return bool(value)
 
     @field_validator("db_echo", mode="before")
     @classmethod
@@ -83,6 +94,8 @@ def _apply_hf_env(settings: Settings) -> None:
         os.environ.setdefault("HF_ENDPOINT", settings.hf_endpoint)
     if settings.hf_token:
         os.environ["HF_TOKEN"] = settings.hf_token
+    if settings.hf_hub_offline:
+        os.environ["HF_HUB_OFFLINE"] = "1"
 
 
 settings = Settings()
@@ -94,6 +107,7 @@ VLLM_MAX_MODEL_LEN = settings.vllm_max_model_len
 VLLM_LIMIT_IMAGES_PER_PROMPT = settings.vllm_limit_images_per_prompt
 VLLM_GPU_MEMORY_UTILIZATION = settings.vllm_gpu_memory_utilization
 VLLM_KV_CACHE_MEMORY_BYTES = settings.vllm_kv_cache_memory_bytes
+VLLM_PRELOAD_AT_STARTUP = settings.vllm_preload_at_startup
 DEFAULT_MAX_TOKENS = settings.vllm_default_max_tokens
 STREAM_CHUNK_CHARS = settings.local_vllm_stream_chunk_chars
 STREAM_CHUNK_DELAY_SEC = settings.local_vllm_stream_chunk_delay_sec

@@ -89,16 +89,21 @@ async def _chat_persisted(
         enable_thinking=req.enable_thinking,
     )
 
+    # 释放请求级 DB 会话，避免同步 vLLM 阻塞事件循环时占用连接导致死锁
+    await session.close()
+
     if not req.stream:
         try:
             content, code, media = await inference.complete(payload)
         except inference.InferenceError as exc:
             logger.warning("推理失败: %s", exc.detail)
-            await conversation_service.remove_last_user_message(session, conv_id)
+            async with async_session_factory() as db:
+                await conversation_service.remove_last_user_message(db, conv_id)
             return JSONResponse({"error": exc.detail}, status_code=503)
-        except Exception as exc:
+        except Exception:
             logger.exception("推理未捕获异常")
-            await conversation_service.remove_last_user_message(session, conv_id)
+            async with async_session_factory() as db:
+                await conversation_service.remove_last_user_message(db, conv_id)
             return JSONResponse(
                 {"error": "推理服务暂时不可用，请稍后重试"},
                 status_code=503,
@@ -107,9 +112,10 @@ async def _chat_persisted(
             data = json.loads(content)
             reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
             if isinstance(reply, str) and reply.strip():
-                await conversation_service.append_assistant_message(
-                    session, conv_id, reply
-                )
+                async with async_session_factory() as db:
+                    await conversation_service.append_assistant_message(
+                        db, conv_id, reply
+                    )
         except (json.JSONDecodeError, IndexError, KeyError):
             pass
         headers = {"X-Conversation-Id": conv_id}

@@ -45,4 +45,4 @@ if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 echo "=== nginx ==="
 bash "$ROOT/scripts/setup-nginx.sh"
-echo "完成。venv=$VENV  下一步: cp .env.example .env && ./scripts/run.sh"
+echo "完成。venv=$VENV  下一步: cp .env.example .env && ./scripts/start-dev.sh"

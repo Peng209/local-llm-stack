@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -23,9 +24,12 @@ _THINKING_RE = re.compile(
 
 _init_lock = threading.Lock()
 _inference_lock = threading.Lock()
+_state_lock = threading.Lock()
 _llm: Any = None
 _processor: Any = None
 _model_id: str | None = None
+_engine_state: str = "idle"  # idle | loading | ready | error
+_engine_error: str | None = None
 
 _MODEL_ALIASES: dict[str, str] = {
     "qwen2-vl-2b": "Qwen/Qwen2-VL-2B-Instruct",
@@ -95,46 +99,65 @@ def _inference_error_from_exc(exc: BaseException) -> InferenceError:
     return InferenceError(f"推理失败: {msg[:500]}")
 
 
+def engine_status() -> dict[str, str | None]:
+    with _state_lock:
+        return {"engine": _engine_state, "engine_error": _engine_error}
+
+
+def _set_engine_state(state: str, error: str | None = None) -> None:
+    global _engine_state, _engine_error
+    with _state_lock:
+        _engine_state = state
+        _engine_error = error
+
+
+def preload_engine() -> None:
+    """启动时预加载 vLLM；Processor 在首次视觉推理时再加载。"""
+    with _state_lock:
+        if _engine_state == "ready":
+            return
+    try:
+        _get_llm()
+    except InferenceError:
+        raise
+    except Exception as exc:
+        raise _inference_error_from_exc(exc) from exc
+
+
+async def preload_async() -> None:
+    # WSL 下 vLLM 使用 spawn，须在主线程初始化；勿放 asyncio.to_thread
+    preload_engine()
+
+
 def _gpu_memory_utilization() -> float:
     requested = float(config.VLLM_GPU_MEMORY_UTILIZATION)
-    requested = max(0.05, min(1.0, requested))
-    try:
-        import torch
-
-        if not torch.cuda.is_available():
-            return requested
-        free, total = torch.cuda.mem_get_info(0)
-        if total <= 0:
-            return requested
-        max_util = (free / total) * 0.95
-        if requested <= max_util:
-            return requested
-        capped = max(0.05, round(max_util - 0.02, 2))
-        _LOG.warning(
-            "空闲 %.2f/%.2f GiB，gpu_memory_utilization %.2f → %.2f",
-            free / _GIB,
-            total / _GIB,
-            requested,
-            capped,
-        )
-        return capped
-    except Exception:
-        return requested
+    return max(0.05, min(1.0, requested))
 
 
 def _get_llm() -> Any:
     global _llm, _model_id
     with _init_lock:
         if _llm is not None:
+            _set_engine_state("ready")
             return _llm
+        with _state_lock:
+            if _engine_state == "idle":
+                _set_engine_state("loading")
         try:
             from vllm import LLM
         except ImportError as exc:
+            _set_engine_state("error", "未安装 vllm")
             raise InferenceError("未安装 vllm") from exc
         model_id = resolve_model_id(config.VLLM_MODEL)
         _model_id = model_id
         gpu_util = _gpu_memory_utilization()
-        _LOG.info("加载 vLLM: %s（util=%.2f）", model_id, gpu_util)
+        _LOG.info(
+            "加载 vLLM: %s（util=%.2f, offline=%s）",
+            model_id,
+            gpu_util,
+            os.environ.get("HF_HUB_OFFLINE", ""),
+        )
+        # 与 test/vllm-test.py 保持一致，避免 WSL 下额外参数导致初始化挂起
         llm_kw: dict[str, Any] = {
             "model": model_id,
             "trust_remote_code": True,
@@ -143,14 +166,13 @@ def _get_llm() -> Any:
             "max_model_len": config.VLLM_MAX_MODEL_LEN,
             "kv_cache_memory_bytes": int(config.VLLM_KV_CACHE_MEMORY_BYTES),
         }
-        if is_vision_model(model_id):
-            llm_kw["limit_mm_per_prompt"] = {
-                "image": config.VLLM_LIMIT_IMAGES_PER_PROMPT,
-            }
         try:
             _llm = LLM(**llm_kw)
         except Exception as exc:
-            raise InferenceError(f"引擎初始化失败: {exc}") from exc
+            detail = f"引擎初始化失败: {exc}"
+            _set_engine_state("error", detail[:500])
+            raise InferenceError(detail) from exc
+        _set_engine_state("ready")
         return _llm
 
 

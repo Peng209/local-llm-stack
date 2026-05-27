@@ -38,7 +38,7 @@ export async function fetchConfig(): Promise<ChatConfig> {
 export async function waitForBackend(
   onProgress?: (msg: string) => void
 ): Promise<ChatConfig> {
-  const maxAttempts = 90;
+  const maxAttempts = 300;
   for (let i = 0; i < maxAttempts; i++) {
     onProgress?.(
       i === 0
@@ -46,17 +46,59 @@ export async function waitForBackend(
         : `等待后端就绪…（${i + 1}/${maxAttempts}）`
     );
     try {
-      const health = await fetch("/health", { signal: AbortSignal.timeout(4000) });
-      if (!health.ok) throw new Error("health not ok");
-      const h = (await health.json()) as { status?: string };
-      if (h.status !== "ok") throw new Error("health bad status");
-      const cfg = await fetchConfig();
-      return cfg;
-    } catch {
+      const health = await fetch("/health", { signal: AbortSignal.timeout(8000) });
+      if (!health.ok) {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      const h = (await health.json()) as {
+        status?: string;
+        engine?: string;
+        engine_error?: string | null;
+      };
+      if (h.status !== "ok") {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      const engine = h.engine ?? "ready";
+      if (engine === "error") {
+        throw new Error(
+          h.engine_error ?? "模型加载失败，请查看 .local/uvicorn.log"
+        );
+      }
+      if (engine === "loading") {
+        onProgress?.(
+          i === 0
+            ? "正在加载模型，首次启动约需 1～3 分钟…"
+            : `模型加载中…（${i + 1}/${maxAttempts}）`
+        );
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      if (engine !== "ready") {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      onProgress?.("后端已就绪");
+      return await fetchConfig();
+    } catch (e) {
+      if (e instanceof Error && !(e.name === "AbortError" || e.name === "TimeoutError")) {
+        const msg = e.message;
+        if (
+          msg.includes("模型加载失败") ||
+          msg.includes("引擎初始化") ||
+          msg.includes("未安装 vllm") ||
+          msg.includes("显存不足")
+        ) {
+          throw e;
+        }
+      }
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
-  throw new Error("后端未就绪，请先启动 ./scripts/run.sh");
+  throw new Error(
+    "后端未就绪（含模型加载超时）。请确认已执行 ./scripts/start-dev.sh，并查看 .local/uvicorn.log"
+  );
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {

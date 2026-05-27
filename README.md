@@ -1,4 +1,4 @@
-# 🐋 my-vllm
+# 🐋 local-llm-stack
 
 **Local deployment on a single RTX 4060 GPU**
 
@@ -12,7 +12,7 @@
 
 my-vllm 面向「**Windows + WSL2 + NVIDIA GPU**」这一常见开发机形态设计：在 **WSL** 中运行 Web 服务、vLLM 推理与 Nginx 反向代理；在 **Windows Docker** 中运行 PostgreSQL，通过 `127.0.0.1:5432` 跨边界访问。用户通过浏览器完成注册登录、多轮对话管理，支持可选模型，支持上传图片等多模态模型 **Qwen2-VL** 图文理解；对话记录按用户隔离存入数据库，支持 **SSE 流式输出** 与 Markdown 渲染。
 
-与「前端调 OpenAI 兼容接口 + 外购数据库」的拼装方案不同，本仓库强调 **单仓库、单进程推理、脚本化运维**：从 `install_dependencies.sh` 安装依赖，到 `run.sh` 启动应用，再到 `run-nginx-and-ngrok.sh` 暴露公网，路径清晰、配置集中（密钥仅在 `.env`，其余默认值在 `fastapi_service/config.py`）。
+与「前端调 OpenAI 兼容接口 + 外购数据库」的拼装方案不同，本仓库强调 **单仓库、单进程推理、脚本化运维**：从 `install_dependencies.sh` 安装依赖，到 `start-dev.sh` 启动应用，再到 `run-nginx-and-ngrok.sh` 暴露公网，路径清晰、配置集中（密钥仅在 `.env`，其余默认值在 `fastapi_service/config.py`）。
 
 ---
 
@@ -114,8 +114,10 @@ cp .env.example .env
 | 脚本 | 作用 |
 |------|------|
 | **`install_dependencies.sh`** | apt + venv `my-vllm` + pip + 前端 + Nginx |
-| **`run.sh`** | 构建前端 → FastAPI `:8101` |
-| `run-fastapi.sh` | 仅重启 FastAPI |
+| **`start-dev.sh`** | `build-react.sh` 构建 dist → `run-fastapi.sh` 后台 `:8101`；`--rebuild` 强制重建前端 |
+| **`start-prod.sh`** | `run-nginx-and-ngrok.sh` → `build-react.sh` → `run-fastapi.sh`；`--rebuild` 强制重建前端 |
+| `run-fastapi.sh` | 仅后端（无 dist 时只有 `/docs`） |
+| `build-react.sh` | 仅构建 `frontend/dist`（由 FastAPI 同源托管，无需代理） |
 | `run-nginx-and-ngrok.sh` | Nginx + ngrok |
 | `setup-nginx.sh` | 配置 Nginx 站点 |
 | `stop-nginx.sh` | 禁用 Nginx 站点 |
@@ -127,12 +129,6 @@ cp .env.example .env
 
 ## 🚀 启动方式
 
-### 🔧 仅后端
-```bash
-sudo lsof -ti:8101 | xargs -r kill -9
-./scripts/run-fastapi.sh
-```
-
 ### 🧪 dev（本机）
 ```powershell
 docker start pg
@@ -140,8 +136,14 @@ docker start pg
 
 ```bash
 sudo lsof -ti:8101 | xargs -r kill -9
-./scripts/run.sh              # 使用已有 dist，或自动构建
-./scripts/run.sh --rebuild    # 强制 npm build
+./scripts/start-dev.sh              # 构建 dist + 启动 :8101（UI 与 API 同源）
+./scripts/start-dev.sh --rebuild    # 强制 npm build
+tail -f .local/uvicorn.log          # 模型加载
+
+# 分开用
+./scripts/run-fastapi.sh            # 只后端 → /docs
+./scripts/build-react.sh              # 只构建 dist（改完前端需 rebuild 或 --rebuild）
+./scripts/build-react.sh --rebuild
 ```
 
 ### 🚢 正式（Nginx + ngrok）
@@ -152,8 +154,8 @@ docker start pg
 
 ```bash
 sudo lsof -ti:8101 | xargs -r kill -9
-./scripts/run.sh --rebuild
-./scripts/run-nginx-and-ngrok.sh
+./scripts/start-prod.sh              # Nginx/ngrok → 构建 → FastAPI（脚本末尾跟随后端启动日志）
+./scripts/start-prod.sh --rebuild    # 强制重建前端
 ```
 
 在 `.env` 中设置 `NGROK_TOKEN` 后，脚本会执行 `ngrok config add-authtoken` 并后台 `ngrok http 80`（日志 `.local/ngrok.log`）。未设置则只启动 Nginx。也可选用 **cloudflared** 等国际网络隧道。
@@ -174,10 +176,15 @@ python test/vllm-test.py     # 离线 vLLM 对话
 | 现象 | 处理 |
 |------|------|
 | **`Connection refused`（数据库）** | `docker start pg`，核对 `.env` 中 `DATABASE_URL` 密码 |
-| **`Method Not Allowed`** | `pkill -f uvicorn` 后重新 `./scripts/run.sh` |
+| **`Method Not Allowed`** | `kill $(cat .local/uvicorn.pid)` 后重新 `./scripts/start-dev.sh` |
 | **Nginx 未监听 80** | `sudo ./scripts/setup-nginx.sh` |
+| **ngrok `ERR_NGROK_3200` offline** | 多为 FastAPI 未起来：看 `.local/uvicorn.log`、`.local/crash-latest.log`；`curl -s http://127.0.0.1:8101/health` |
 | **ngrok 未启动** | 检查 `NGROK_TOKEN` 与 `.local/ngrok.log` |
+| **无 `crash-latest.log`** | SIGKILL(OOM) 无法 trap；现由启动脚本在进程早退时写入；仍可看 `uvicorn.log` 尾部 |
 | **显存不足 / OOM** | 降低 `config.py` 中 `vllm_gpu_memory_utilization`（如 `0.4`）；或换 `Qwen3-0.6B` 纯文本模型 |
+| **curl 返回空 / `000`** | 进程已挂：`kill -0 $(cat .local/uvicorn.pid)`；多为 vLLM 后台加载 OOM；降 `VLLM_GPU_MEMORY_UTILIZATION` 或 `.env` 设 `VLLM_PRELOAD_AT_STARTUP=false` |
+| **服务未响应** | 看 `.local/uvicorn.log`；`kill $(cat .local/uvicorn.pid)` 后重新 `./scripts/start-dev.sh` |
+| **模型加载慢** | 首次约 1～3 分钟，启动脚本会预加载；前端会显示「正在加载模型」 |
 
 ---
 

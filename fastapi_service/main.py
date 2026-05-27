@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,18 +10,29 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from fastapi_service import config  # noqa: F401 — 加载 .env
+from fastapi_service import config, inference  # noqa: F401 — 加载 .env
 from fastapi_service.db import init_db
 from fastapi_service.routes.auth import router as auth_router
 from fastapi_service.routes.conversations import router as conversations_router
 from fastapi_service.routes.web import router as web_router
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+_LOG = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    _LOG.info("初始化数据库…")
     await init_db()
+    _LOG.info("数据库就绪")
+    if config.VLLM_PRELOAD_AT_STARTUP:
+        _LOG.info("vLLM 已在 server 入口预加载")
+    else:
+        _LOG.info("vLLM 将在首次对话时加载")
     yield
 
 
@@ -43,8 +55,13 @@ app.include_router(web_router)
 
 
 @app.get("/health", tags=["Service"], summary="健康检查")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "model": config.VLLM_MODEL}
+async def health() -> dict[str, str | None]:
+    body: dict[str, str | None] = {
+        "status": "ok",
+        "model": config.VLLM_MODEL,
+        **inference.engine_status(),
+    }
+    return body
 
 
 def _mount_frontend() -> None:

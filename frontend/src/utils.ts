@@ -19,7 +19,7 @@ export function friendlyError(raw: unknown): string {
   if (/connection refused|connect|timeout|无法连接|502|503|network error|failed to fetch/i.test(
     s
   )) {
-    return "无法连接后端，请确认已执行 ./scripts/run.sh";
+    return "无法连接后端，请确认已执行 ./scripts/start-dev.sh";
   }
   if (/<!doctype\s+html|<html[\s>]/i.test(s)) {
     return "服务器返回了错误页面而非 API 数据，请检查后端是否崩溃或 ngrok/Nginx 是否超时。";
