@@ -29,10 +29,6 @@ async def lifespan(_app: FastAPI):
     _LOG.info("初始化数据库…")
     await init_db()
     _LOG.info("数据库就绪")
-    if config.VLLM_PRELOAD_AT_STARTUP:
-        _LOG.info("vLLM 已在 server 入口预加载")
-    else:
-        _LOG.info("vLLM 将在首次对话时加载")
     yield
 
 

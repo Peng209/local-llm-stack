@@ -111,24 +111,6 @@ def _set_engine_state(state: str, error: str | None = None) -> None:
         _engine_error = error
 
 
-def preload_engine() -> None:
-    """启动时预加载 vLLM；Processor 在首次视觉推理时再加载。"""
-    with _state_lock:
-        if _engine_state == "ready":
-            return
-    try:
-        _get_llm()
-    except InferenceError:
-        raise
-    except Exception as exc:
-        raise _inference_error_from_exc(exc) from exc
-
-
-async def preload_async() -> None:
-    # WSL 下 vLLM 使用 spawn，须在主线程初始化；勿放 asyncio.to_thread
-    preload_engine()
-
-
 def _gpu_memory_utilization() -> float:
     requested = float(config.VLLM_GPU_MEMORY_UTILIZATION)
     return max(0.05, min(1.0, requested))

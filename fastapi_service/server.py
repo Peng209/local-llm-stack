@@ -37,14 +37,13 @@ def _preload_vllm_main_thread() -> None:
 def main() -> None:
     from fastapi_service import config
 
-    if config.VLLM_PRELOAD_AT_STARTUP:
-        _LOG.info("主线程预加载 vLLM: %s", config.VLLM_MODEL)
-        try:
-            _preload_vllm_main_thread()
-            _LOG.info("vLLM 预加载完成")
-        except Exception as exc:
-            _LOG.exception("vLLM 预加载失败: %s", exc)
-            sys.exit(1)
+    _LOG.info("主线程预加载 vLLM: %s（启动约 3～4 分钟）", config.VLLM_MODEL)
+    try:
+        _preload_vllm_main_thread()
+        _LOG.info("vLLM 预加载完成")
+    except Exception as exc:
+        _LOG.exception("vLLM 预加载失败: %s", exc)
+        sys.exit(1)
 
     import uvicorn
 

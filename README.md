@@ -183,9 +183,9 @@ python test/vllm-test.py     # 离线 vLLM 对话
 | **ngrok 未启动** | 检查 `NGROK_TOKEN` 与 `.local/ngrok.log` |
 | **无 `crash-latest.log`** | SIGKILL(OOM) 无法 trap；现由启动脚本在进程早退时写入；仍可看 `uvicorn.log` 尾部 |
 | **显存不足 / OOM** | 降低 `config.py` 中 `vllm_gpu_memory_utilization`（如 `0.4`）；或换 `Qwen3-0.6B` 纯文本模型 |
-| **curl 返回空 / `000`** | 进程已挂：`kill -0 $(cat .local/uvicorn.pid)`；多为 vLLM 后台加载 OOM；降 `VLLM_GPU_MEMORY_UTILIZATION` 或 `.env` 设 `VLLM_PRELOAD_AT_STARTUP=false` |
+| **curl 返回空 / `000`** | 进程已挂：`kill -0 $(cat .local/uvicorn.pid)`；多为 vLLM 预加载 OOM；降 `VLLM_GPU_MEMORY_UTILIZATION` 或 `VLLM_MAX_MODEL_LEN` |
 | **服务未响应** | 看 `.local/uvicorn.log`；`kill $(cat .local/uvicorn.pid)` 后重新 `./scripts/start-dev.sh` |
-| **模型加载慢** | 首次约 1～3 分钟，启动脚本会预加载；前端会显示「正在加载模型」 |
+| **模型加载慢** | 启动时预加载 vLLM，约 3～4 分钟；前端会显示「正在加载模型」 |
 
 ---
 

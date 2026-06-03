@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     vllm_max_model_len: int = 4096
     vllm_limit_images_per_prompt: int = 4
     vllm_kv_cache_memory_bytes: int = 536_870_912
-    vllm_preload_at_startup: bool = True
     vllm_default_max_tokens: int = 512
     local_vllm_stream_chunk_chars: int = 12
     local_vllm_stream_chunk_delay_sec: float = 0.02
@@ -107,7 +106,6 @@ VLLM_MAX_MODEL_LEN = settings.vllm_max_model_len
 VLLM_LIMIT_IMAGES_PER_PROMPT = settings.vllm_limit_images_per_prompt
 VLLM_GPU_MEMORY_UTILIZATION = settings.vllm_gpu_memory_utilization
 VLLM_KV_CACHE_MEMORY_BYTES = settings.vllm_kv_cache_memory_bytes
-VLLM_PRELOAD_AT_STARTUP = settings.vllm_preload_at_startup
 DEFAULT_MAX_TOKENS = settings.vllm_default_max_tokens
 STREAM_CHUNK_CHARS = settings.local_vllm_stream_chunk_chars
 STREAM_CHUNK_DELAY_SEC = settings.local_vllm_stream_chunk_delay_sec

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 正式：run-nginx-and-ngrok.sh → build-react.sh → run-fastapi.sh（Nginx/ngrok 不依赖后端，先起）
+# 正式：run-nginx-and-ngrok.sh → build-react.sh → run-fastapi.sh → 监控日志
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -24,15 +25,17 @@ bash "$ROOT/scripts/run-nginx-and-ngrok.sh"
 bash "$ROOT/scripts/build-react.sh" "${BUILD_ARGS[@]}"
 bash "$ROOT/scripts/run-fastapi.sh"
 
+LOG=".local/uvicorn.log"
+PID="$(cat .local/uvicorn.pid)"
+
 echo ""
-echo "=== 健康检查 ==="
-if curl -sf --max-time 5 http://127.0.0.1:8101/health; then
-  echo ""
-  echo "FastAPI 正常。若稍后 curl 变 000，多为 vLLM 加载 OOM，见: tail -50 .local/uvicorn.log"
-else
-  echo "FastAPI 无响应 (curl 000/超时)" >&2
-  echo "  日志: .local/uvicorn.log" >&2
-  echo "  诊断: .local/crash-latest.log（若存在）" >&2
-  echo "  常见: 显存不足 → .env 设 VLLM_GPU_MEMORY_UTILIZATION=0.35 或 VLLM_PRELOAD_AT_STARTUP=false" >&2
-  exit 1
-fi
+echo "=== 监控中 · PID $PID · Ctrl+C 仅退出监控（服务继续后台运行）==="
+tail -f "$LOG" &
+tail_pid=$!
+trap 'kill "$tail_pid" 2>/dev/null; exit 0' INT
+
+while kill -0 "$PID" 2>/dev/null; do sleep 3; done
+kill "$tail_pid" 2>/dev/null
+echo ""
+echo "FastAPI 已退出 (PID $PID)，见 $LOG" >&2
+exit 1
